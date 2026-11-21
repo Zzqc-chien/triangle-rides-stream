@@ -9,6 +9,11 @@ Results go to two places:
   * table  zone_minute_metrics  (upserted while the window is still filling) and topic ride-zone-metrics
   * table  surge_alerts         when a window crosses an alert rule, and topic ride-surge-alerts
 
+Replays: the totals are additive, so counting a message twice would inflate them. The consumer
+therefore keeps the last offset it has counted per partition in the stream_offsets table, written
+in the same transaction as the totals. After a crash, Kafka re-delivers the uncommitted batch and
+the consumer skips every message at or below that stored offset.
+
 Run:  python consumer_metrics.py
 Consumer group: zone-metrics
 """
@@ -56,6 +61,18 @@ ON CONFLICT (window_start, pickup_zone, rule) DO NOTHING
 RETURNING alerted_at
 """
 
+OFFSETS_SELECT = """
+SELECT partition, last_offset FROM stream_offsets
+WHERE consumer_group = %s AND topic = %s
+FOR UPDATE
+"""
+OFFSETS_UPSERT = """
+INSERT INTO stream_offsets (consumer_group, topic, partition, last_offset, updated_at)
+VALUES (%s, %s, %s, %s, now())
+ON CONFLICT (consumer_group, topic, partition) DO UPDATE
+SET last_offset = GREATEST(stream_offsets.last_offset, EXCLUDED.last_offset), updated_at = now()
+"""
+
 conn = connect()
 ensure_schema(conn)
 producer = make_producer()
@@ -100,9 +117,20 @@ def check_rules(row: dict) -> list[tuple[str, float, str]]:
     return fired
 
 
-def handle_batch(trips: list[dict]) -> None:
+def handle_batch(records: list[tuple[dict, str, int, int]]) -> None:
+    """records = (trip, topic, partition, offset), as run_consumer(with_positions=True) passes them."""
     updated, new_alerts = [], []
     with conn.cursor() as cur:
+        cur.execute(OFFSETS_SELECT, (GROUP_ID, TRIPS_TOPIC))
+        counted = dict(cur.fetchall())                  # partition -> last offset already counted
+        trips = [t for t, _, p, o in records if o > counted.get(p, -1)]
+        skipped = len(records) - len(trips)
+        newest: dict[int, int] = {}
+        for _, _, p, o in records:
+            newest[p] = max(o, newest.get(p, -1))
+        for p, o in newest.items():
+            cur.execute(OFFSETS_UPSERT, (GROUP_ID, TRIPS_TOPIC, p, o))
+
         for partial in aggregate(trips):
             cur.execute(UPSERT_SQL, partial)
             cols = [d.name for d in cur.description]
@@ -117,6 +145,8 @@ def handle_batch(trips: list[dict]) -> None:
                                        "value": round(value, 3), "trips": row["trips"],
                                        "message": message})
     conn.commit()
+    if skipped:
+        print(f"[{GROUP_ID}] skipped {skipped} replayed messages already counted")
 
     for row in updated:
         payload = {**row, "window_start": row["window_start"].isoformat()}
@@ -129,6 +159,6 @@ def handle_batch(trips: list[dict]) -> None:
 
 if __name__ == "__main__":
     try:
-        run_consumer(GROUP_ID, [TRIPS_TOPIC], handle_batch, max_wait_s=2.0)
+        run_consumer(GROUP_ID, [TRIPS_TOPIC], handle_batch, max_wait_s=2.0, with_positions=True)
     finally:
         producer.flush(5)

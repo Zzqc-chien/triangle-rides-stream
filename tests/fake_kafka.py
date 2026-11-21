@@ -20,8 +20,14 @@ BROKER = _Broker()
 
 
 class FakeMessage:
-    def __init__(self, topic, key, value):
-        self._t, self._k, self._v = topic, key, value
+    def __init__(self, topic, key, value, offset):
+        self._t, self._k, self._v, self._o = topic, key, value, offset
+
+    def partition(self):
+        return 0
+
+    def offset(self):
+        return self._o
 
     def topic(self):
         return self._t
@@ -44,7 +50,7 @@ class FakeProducer:
         value = value.encode() if isinstance(value, str) else value
         key = key.encode() if isinstance(key, str) else key
         with BROKER.lock:
-            BROKER.topics[topic].append(FakeMessage(topic, key, value))
+            BROKER.topics[topic].append(FakeMessage(topic, key, value, len(BROKER.topics[topic])))
 
     def poll(self, timeout=0):
         return 0

@@ -35,6 +35,18 @@ CREATE TABLE IF NOT EXISTS zone_minute_metrics (
     PRIMARY KEY (window_start, pickup_zone)
 );
 
+-- Part 4: the last Kafka offset per partition already counted into zone_minute_metrics.
+-- Written in the same transaction as the aggregates, so a replayed message is skipped
+-- instead of being added to the totals a second time.
+CREATE TABLE IF NOT EXISTS stream_offsets (
+    consumer_group TEXT NOT NULL,
+    topic          TEXT NOT NULL,
+    partition      INTEGER NOT NULL,
+    last_offset    BIGINT NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (consumer_group, topic, partition)
+);
+
 -- Part 4: alert rule fired from the windowed metrics.
 CREATE TABLE IF NOT EXISTS surge_alerts (
     window_start   TIMESTAMPTZ NOT NULL,
@@ -94,3 +106,4 @@ ALTER TABLE surge_alerts           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fare_anomalies         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE completion_predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_metrics          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stream_offsets         ENABLE ROW LEVEL SECURITY;

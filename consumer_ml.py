@@ -1,11 +1,12 @@
 """Extension B - Sequential modeling on the live stream. Two online models, both learned as events arrive.
 
 1. Trip completion probability (prediction)
-   An online logistic regression (scikit-learn SGDClassifier, partial_fit) predicts the probability
-   that a trip will be completed, using only what is known when the ride is requested: pickup zone,
-   service type, quoted pickup ETA, surge multiplier, route distance and local time of day.
-   Evaluation is prequential ("test, then train"): each trip is scored *before* the model learns
-   from its outcome, so every stored prediction is an honest out-of-sample prediction.
+   A logistic regression, refitted every 200 trips on a sliding window of recent trips, scores each
+   incoming trip record before learning from its outcome (prequential, "test, then train"), so every
+   stored prediction is out of sample. Features: pickup zone, service type, quoted pickup ETA,
+   surge multiplier, route distance and local time of day - fields a real system would know at
+   request time. Two limits: the stream carries finished trips (there is no separate request
+   event), and distance_km on ~0.4% of completed trips has been altered by the simulated GPS glitch.
 
 2. Fare anomaly detection
    Per service type, a recursive-least-squares regression learns the price curve

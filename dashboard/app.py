@@ -131,17 +131,22 @@ def live():
     alerts_15 = query("SELECT count(*) AS n FROM surge_alerts WHERE window_start > :a - interval '15 minutes'",
                       a=anchor)["n"].iloc[0]
 
-    st.subheader("Last 15 minutes", help="Arrows compare with the 15 minutes before that.")
+    st.subheader("Last 15 minutes", help="Arrows compare the first five numbers with the 15 minutes "
+                                         "before that. Zone alerts has no comparison.")
     c = st.columns(6)
     if cur is not None:
         c[0].metric("Trips", f"{int(cur.trips):,}", fmt_delta(cur.trips, prev.get("trips")))
-        c[1].metric("Gross bookings", f"${cur.revenue:,.0f}", fmt_delta(cur.revenue, prev.get("revenue")))
+        c[1].metric("Gross bookings", f"${cur.revenue:,.0f}", fmt_delta(cur.revenue, prev.get("revenue")),
+                    help="Sum of fare + tip over all trips, including the $5 fee on some late rider "
+                         "cancellations.")
         c[2].metric("Avg fare (completed)", f"${cur.avg_fare:,.2f}", fmt_delta(cur.avg_fare, prev.get("avg_fare")))
         c[3].metric("Cancellation rate", f"{cur.cancel_rate:.1%}",
                     fmt_delta(cur.cancel_rate, prev.get("cancel_rate"), pct=True), delta_color="inverse")
         c[4].metric("Avg pickup ETA", f"{cur.eta:.1f} min", fmt_delta(cur.eta, prev.get("eta")),
                     delta_color="inverse")
-    c[5].metric("Surge alerts", f"{alerts_15}")
+    c[5].metric("Zone alerts", f"{alerts_15}",
+                help="Alerts fired by the stream processor for windows in the last 15 minutes: "
+                     "high surge (avg ≥ 2.0×, ≥ 8 trips) or high cancellations (≥ 40%, ≥ 15 trips).")
 
     # ----------------------------------------------------------------- raw-stream charts
     left, right = st.columns(2)

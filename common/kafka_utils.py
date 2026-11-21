@@ -1,8 +1,9 @@
 """Shared Kafka consumer loop: poll, collect a small batch, hand it to a handler, commit offsets.
 
-Offsets are committed only after the handler has written the batch to Postgres, so a crash
-re-delivers the batch instead of losing it (at-least-once). The tables use primary keys with
-ON CONFLICT, so a re-delivered event does not create a duplicate row.
+Offsets are committed to Kafka only after the handler has written the batch to Postgres, so a
+crash re-delivers the batch instead of losing it (at-least-once). What a re-delivered batch does
+depends on the handler: row inserts are keyed (ON CONFLICT DO NOTHING), and the aggregating
+consumer stores its own offsets in Postgres so it can skip messages it has already counted.
 """
 
 import json
@@ -34,7 +35,9 @@ def run_consumer(
     max_batch: int = 200,
     max_wait_s: float = 1.0,
     on_idle: Callable[[], None] | None = None,
+    with_positions: bool = False,
 ) -> None:
+    """with_positions=True hands the handler (event, topic, partition, offset) tuples instead of events."""
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGINT, _stop)
         signal.signal(signal.SIGTERM, _stop)
@@ -58,7 +61,8 @@ def run_consumer(
                 if msg.error():
                     print(f"[{group_id}] kafka error: {msg.error()}")
                     continue
-                batch.append(json.loads(msg.value()))
+                event = json.loads(msg.value())
+                batch.append((event, msg.topic(), msg.partition(), msg.offset()) if with_positions else event)
 
             if batch and (len(batch) >= max_batch or time.time() - batch_started >= max_wait_s):
                 handle_batch(batch)

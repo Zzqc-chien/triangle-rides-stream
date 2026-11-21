@@ -37,7 +37,7 @@ threads = [
                      args=(consumer_storage.GROUP_ID, [TRIPS_TOPIC], consumer_storage.handle_batch)),
     threading.Thread(target=kafka_utils.run_consumer, name="metrics",
                      args=(consumer_metrics.GROUP_ID, [TRIPS_TOPIC], consumer_metrics.handle_batch),
-                     kwargs={"max_wait_s": 2.0}),
+                     kwargs={"max_wait_s": 2.0, "with_positions": True}),
     threading.Thread(target=consumer_ml.main, name="ml"),
 ]
 for t in threads:
@@ -57,3 +57,21 @@ kafka_utils._running = False
 for t in threads:
     t.join(timeout=15)
 print("topics:", {k: len(v) for k, v in BROKER.topics.items()})
+
+# Replay check: hand every trip to the aggregating consumer a second time, as Kafka would after a
+# crash between the database commit and the offset commit. The totals must not change.
+TOTALS = "SELECT coalesce(sum(trips), 0), coalesce(round(sum(revenue_usd)::numeric, 2), 0) FROM zone_minute_metrics"
+c = consumer_metrics.conn
+with c.cursor() as cur:
+    cur.execute(TOTALS)
+    before = cur.fetchone()
+c.commit()
+replay = [(__import__("json").loads(m.value()), m.topic(), m.partition(), m.offset())
+          for m in BROKER.topics[TRIPS_TOPIC]]
+consumer_metrics.handle_batch(replay)
+with c.cursor() as cur:
+    cur.execute(TOTALS)
+    after = cur.fetchone()
+c.commit()
+print(f"replay check: zone totals before={before} after={after} ->",
+      "OK, unchanged" if before == after else "FAILED, totals inflated")
