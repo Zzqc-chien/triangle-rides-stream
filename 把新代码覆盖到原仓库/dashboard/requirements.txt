@@ -1,6 +1,0 @@
-# Streamlit Community Cloud installs this file (it sits next to app.py), so the cloud build stays small.
-streamlit>=1.50
-altair>=5.0
-pandas>=2.1
-sqlalchemy>=2.0
-psycopg[binary]>=3.2
