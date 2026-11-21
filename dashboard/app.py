@@ -96,8 +96,13 @@ def live():
     try:
         status = query("SELECT max(event_time) AS last_event, count(*) AS n FROM trips")
     except Exception as exc:
-        st.error(f"Cannot reach the database yet: {exc.__class__.__name__}. "
-                 "Check DATABASE_URL and that the consumers have created the tables.")
+        # Show which host we tried and the driver's reason, never the password.
+        url = engine().url
+        reason = str(getattr(exc, "orig", exc)).strip().splitlines()[0][:300]
+        st.error(f"Cannot reach the database: {exc.__class__.__name__}\n\n"
+                 f"Host tried: `{url.host}:{url.port}` (user `{url.username}`)\n\n"
+                 f"Reason: {reason}\n\n"
+                 "If the host is `localhost`, the DATABASE_URL secret was not found.")
         return
     if status["n"].iloc[0] == 0:
         st.info("No trips stored yet - start the producer and consumers (see README).")
@@ -215,13 +220,17 @@ def live():
             SELECT window_start, pickup_zone, avg_surge, trips, cancelled, revenue_usd
             FROM zone_minute_metrics WHERE window_start > :a - interval '30 minutes'""", a=anchor)
         windows = to_local(windows, "window_start")
+        # One discrete column per minute: a temporal x would stretch each rect to the next window.
+        windows["minute"] = windows["window_start"].dt.strftime("%H:%M")
+        minutes = sorted(windows["minute"].unique())
         chart = alt.Chart(windows).mark_rect(stroke="white", strokeWidth=1).encode(
-            x=alt.X("window_start:T", title=None, axis=alt.Axis(format="%H:%M", grid=False, tickMinStep=60_000)),
+            x=alt.X("minute:O", title=None, sort=minutes,
+                    axis=alt.Axis(labelAngle=0, labelOverlap="parity", grid=False)),
             y=alt.Y("pickup_zone:N", title=None, axis=alt.Axis(labelOverlap=False, labelLimit=170)),
             color=alt.Color("avg_surge:Q", title="surge",
                             scale=alt.Scale(range=SEQ_BLUE, domain=[1, 3], clamp=True),
                             legend=alt.Legend(orient="right", format=".1f", gradientLength=160)),
-            tooltip=["pickup_zone:N", alt.Tooltip("window_start:T", format="%H:%M", title="minute"),
+            tooltip=["pickup_zone:N", "minute:N",
                      alt.Tooltip("avg_surge:Q", format=".2f", title="avg surge"), "trips:Q",
                      "cancelled:Q", alt.Tooltip("revenue_usd:Q", format="$,.0f", title="bookings")],
         )
