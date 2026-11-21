@@ -1,6 +1,6 @@
 # 🚕 Triangle Rides — a real-time ride-hailing pipeline
 
-**Live dashboard:** https://YOUR-APP.streamlit.app  ← *replace after deploying (step 4 below)*
+**Live dashboard:** https://triangle-rides.streamlit.app/
 
 Synthetic ride-hailing trips around the Research Triangle (Durham, Raleigh, Chapel Hill) stream
 through **Apache Kafka**. One consumer stores every trip in **Postgres**, a second computes live
